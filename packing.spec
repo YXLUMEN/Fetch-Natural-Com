@@ -5,7 +5,7 @@ block_cipher = None
 
 
 a = Analysis(
-    ['httpReNature.py','tt_draw.py'],
+    ['http_fetch.py','tt_draw.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -28,7 +28,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='GetNatureMaterials',
+    name='FetchNatureCom',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
