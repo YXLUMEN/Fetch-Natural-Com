@@ -22,24 +22,22 @@ OUTPUT_FOLDER: str = 'output'
 
 
 def get_html(url: str, rand: bool = False, do_re_try: bool = True, re_try_times: int = 5, timeout: int = 60) -> str:
-    headers: dict[str, str] = {'referer': 'https://www.nature.com/'}
+    headers: dict[str, str] = dict(referer='https://www.nature.com/')
     if not rand:
         headers[
             'User-agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36 Edg/113.0.1774.50'
     else:
-        ua = FakeUserAgent()
-        headers['User-agent'] = ua.random
+        headers['User-agent'] = FakeUserAgent().random
 
     for i in range(re_try_times):
         try:
-            r = requests.get(url, headers=headers, timeout=timeout)
-            r.raise_for_status()
-            r.encoding = ENCODING
-            return r.text
+            resp = requests.get(url, headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            resp.encoding = ENCODING
+            return resp.text
         except Exception as e:
             if i >= re_try_times - 1 or not do_re_try:
-                print('\r\nget_html:  ', end='')
-                print(e)
+                print(f'\r\nget_html: {repr(e)}')
                 break
             print(f'\rRetry connecting... {i + 1}/{re_try_times}', end='')
         finally:
@@ -47,6 +45,7 @@ def get_html(url: str, rand: bool = False, do_re_try: bool = True, re_try_times:
 
 
 def wrap_two(text: str) -> str:
+    # 我不知道为什么,都是如果改了就获取不到
     return re.sub(r'。', '\n', text).replace('.', '.\n')
 
 
@@ -80,9 +79,9 @@ def web_change(tag: BeautifulSoup) -> bool:
                 return False
             cache_hash['cache_hashes'] = tag_hash
 
-        with open(cache_file, 'w', encoding=ENCODING) as f:
-            json.dump(cache_hash, f)
-            return True
+        with open(cache_file, 'w', encoding=ENCODING) as g:
+            json.dump(cache_hash, g)
+        return True
     except Exception as e:
         print(f'web_change: {repr(e)}')
         if os.path.exists(cache_file):
@@ -90,23 +89,19 @@ def web_change(tag: BeautifulSoup) -> bool:
         return True
 
 
-def baidu_translate(text: str, flag: int = 0, qps: int = 1, max_require_length: int = 1000) -> str:
-    if os.path.isfile(path + fileName):
-        api_list = json_api_read(path + fileName)
-        api_id = api_list['api_id']
-        secret_key = api_list['secret_key']
+def baidu_translate(text: str, flag: str = 'zh', qps: int = 1, max_require_length: int = 1000) -> str:
+    if os.path.isfile(f'{ConfigPath}{FileName}'):
+        _api: dict = json_api_read(f'{ConfigPath}{FileName}')
+        api_id: str = _api.get('api_id')
+        secret_key: str = _api.get('secret_key')
     else:
         print('因安全问题,百度API需自行提供,输入后将保存')
         api_id: str = input('API账户: ')
         secret_key: str = input('API密钥: ')
-        json_api_write(path, api_id, secret_key)
+        json_api_write(ConfigPath, api_id, secret_key)
 
-    baidu_api_url: str = 'https://api.fanyi.baidu.com/api/trans/vip/translate'
-    from_lang: str = 'auto'
-    to_lang: str = 'en' if flag == 1 else 'zh'
-
-    temp: list = []
-    translated_strs: list = []
+    temp: list = list()
+    translated_strs: list = list()
 
     if len(text) > max_require_length:
         temp = text.split('.')
@@ -115,21 +110,25 @@ def baidu_translate(text: str, flag: int = 0, qps: int = 1, max_require_length: 
 
     for split_text in temp:
         try:
-            salt: int = random.randint(3276, 65536)
+            salt: str = str(random.randint(3276, 65536))
             sign_text: str = f'{api_id}{split_text}{str(salt)}{secret_key}'
             sign: str = hashlib.md5(sign_text.encode()).hexdigest()
+
             data: dict = {
                 'q': split_text,
-                'from': from_lang,
-                'to': to_lang,
+                'from': 'auto',
+                'to': flag,
                 'appid': api_id,
-                'salt': str(salt),
+                'salt': salt,
                 'sign': sign
             }
-            res: Response = requests.post(baidu_api_url, data=data)
+
+            res: Response = requests.post('https://api.fanyi.baidu.com/api/trans/vip/translate', data=data)
             result = res.json()['trans_result'][0]['dst']
             translated_strs.append(result)
             time.sleep(1 / qps)
+        except KeyError:
+            return ''
         except Exception as e:
             print(f'baidu_translate: {repr(e)}')
 
@@ -137,18 +136,16 @@ def baidu_translate(text: str, flag: int = 0, qps: int = 1, max_require_length: 
 
 
 def process_and_write(data: dict):
-    title = data.get('title')
-    summary = data.get('summary')
-    abstract = data.get('abstract')
-    link = data.get('link')
-    pub_time = data.get('pub_time')
+    title: str = data.get('title')
+    summary: str = data.get('summary')
+    abstract: str = data.get('abstract')
+    link: str = data.get('link')
+    pub_time: str = data.get('pub_time')
 
     if select == 'y':
-        translateLock.acquire()
-        title = baidu_translate(title)
-        summary = baidu_translate(summary)
-        abstract = baidu_translate(abstract)
-        translateLock.release()
+        with TranslateLock:
+            title, summary, abstract = baidu_translate(title), baidu_translate(summary), baidu_translate(abstract)
+
         summary = summary.replace('＜', '<').replace('＞', '>')
         abstract = abstract.replace('＜', '<').replace('＞', '>')
 
@@ -165,13 +162,14 @@ def process_and_write(data: dict):
 
 
 def get_abstract(url: str, all_result: dict):
-    html = get_html(url, rand=UseRandomHeaders, re_try_times=2)
-    soup = BeautifulSoup(html, "lxml")
+    html: str = get_html(url, rand=UseRandomHeaders, re_try_times=2)
+    soup: BeautifulSoup = BeautifulSoup(html, "lxml")
     [s.extract() for s in soup.find_all(attrs={'class': 'recommended pull pull--left u-sans-serif'})]
     text: str = str(soup.find(attrs={'class': 'c-article-body main-content'}))
 
     text = text.replace('<h2>', '\n### ').replace('</h2>', '\n').replace('\n</figcaption>', '</figcaption>')
     text = re.sub(r'(</?a.*?>)|(</?p.*?>)|(</source>)|(</?div.*?>)|(</?span.*?>)|(<iframe.*>)', '', text)
+    # 修复链接
     text = text.replace('//media', 'https://media')
 
     all_result['abstract'] = text
@@ -181,14 +179,16 @@ def get_abstract(url: str, all_result: dict):
 def process_text_analysis(tag):
     try:
         title_link = tag.find(attrs={"class": "c-card__link u-link-inherit"})
-        title = re.sub('(</?a.*?>)|(</?p>)', '', str(title_link))
+        title: str = re.sub('(</?a.*?>)|(</?p>)', '', str(title_link))
         summary = tag.find(attrs={"class": "c-card__summary u-mb-16 u-hide-sm-max"})
         if summary:
             summary = summary.select('p')[0]
             summary = re.sub('(</?a.*?>)|(</?p>)', '', str(summary))
         else:
             summary = 'None'
-        link = title_link.get('href')
+
+        link: str = title_link.get('href')
+
         pub_time = tag.select("time[class='c-meta__item']")
         if pub_time:
             pub_time = pub_time[0].get_text()
@@ -207,7 +207,7 @@ def process_text_analysis(tag):
                 'pub_time': pub_time,
                 'link': url
             }
-            work_pool.submit(get_abstract, url, result)
+            WorkPool.submit(get_abstract, url, result)
     except Exception as e:
         print(f'\r\nprocess_text_analysis: {repr(e)}', end='')
 
@@ -218,7 +218,7 @@ def start_text_analysis(soup: BeautifulSoup):
     for box in all_boxs:
         for tag in soup.select(f'li[class={box}]'):
             process_text_analysis(tag)
-    work_pool.shutdown()
+    WorkPool.shutdown()
     end: float = time.perf_counter()
     print(f'\r\nAnalysis completed in: {end - start}s')
 
@@ -235,17 +235,20 @@ def tt_draw(tt_type: str = '0'):
         tName: str = 'draw_random'
         if repeat_thread_detect(tName):
             return
-        draw_random = threading.Thread(target=tt_draw_random, daemon=True, name=tName)
+        draw_random = threading.Thread(target=tt_draw_random, name=tName)
         draw_random.start()
+        draw_random.join()
     elif tt_type == '1':
         tName: str = 'draw_polyhedral'
         if repeat_thread_detect(tName):
             return
-        draw_polyhedral = threading.Thread(target=tt_draw_polyhedral, daemon=True, name=tName)
+        draw_polyhedral = threading.Thread(target=tt_draw_polyhedral, name=tName)
         draw_polyhedral.start()
+        draw_polyhedral.join()
     elif tt_type == '2':
         draw_picture = multiprocessing.Process(
-            target=TTPixelImage.tt_draw_picture, args=(f'{SAVE_FOLDER}/cxk.jpg', 5, 0.2, 0.2), name='draw_picture')
+            target=TTPixelImage.tt_draw_picture,
+            args=('https://www.yangandxu.online/static/img/not%20used/cxk.jpg', 5, 0.2, 0.2), name='draw_picture')
         draw_picture.start()
         draw_picture.join()
     else:
@@ -256,13 +259,13 @@ def json_api_write(fdir: str, api_id: str, secret_key: str):
     if not os.path.exists(fdir):
         os.mkdir(fdir)
     with open(fr'{fdir}\api.json', 'w') as f:
-        json.dump({'api_id': api_id, 'secret_key': secret_key}, f, indent=4, ensure_ascii=False)
+        json.dump({'api_id': api_id, 'secret_key': secret_key}, f, ensure_ascii=False)
 
 
 def json_api_read(file_path: str):
     if not os.access(file_path, os.R_OK):
         return None
-    with open(f'{file_path}', 'rb', encoding=ENCODING) as f:
+    with open(f'{file_path}', 'rb') as f:
         return json.load(f)
 
 
@@ -287,14 +290,14 @@ def start_fetch():
 
 
 if __name__ == '__main__':
-    folderDir: str = os.environ.get('APPDATA')
-    fileName: str = 'api.json'
-    path: str = folderDir + '\\pyhttpRe\\'
-    translateLock = threading.RLock()
+    AppDir: str = os.environ.get('APPDATA')
+    FileName: str = 'api.json'
+    ConfigPath: str = AppDir + '\\pyhttpRe\\'
+    TranslateLock = threading.RLock()
     urlCollect: set = set()
-    useExternalData: bool = True
+    UseExternalData: bool = True
     UseRandomHeaders: bool = False
-    work_pool = ThreadPoolExecutor(max_workers=8)
+    WorkPool = ThreadPoolExecutor(max_workers=8)
 
     while True:
         select: str = input('\n(1)获取; (2)强制刷新; (3)重新输入密钥; (4)查询当前密钥; (5)清除密钥; (q)退出\r\n')
@@ -311,7 +314,7 @@ if __name__ == '__main__':
                 select: str = input('(y/n)是否翻译?: ')
                 start_fetch()
             date: str = time.strftime('%y-%m-%d')
-            if os.path.getsize(temp_save_file):
+            if os.path.exists(temp_save_file):
                 change_character_doc(temp_save_file, f'{OUTPUT_FOLDER}/{date}-Nature.md')
 
             print(f'爬取完成,结果保存于{date}-Nature.md')
@@ -326,14 +329,16 @@ if __name__ == '__main__':
                 print('刷新完成')
             except FileNotFoundError:
                 print('无此文件')
+            except Exception as E:
+                print(repr(E))
 
         elif select == '3':
             apiId: str = input('API账户: ')
             secretKey: str = input('API密钥: ')
-            json_api_write(path, apiId, secretKey)
+            json_api_write(ConfigPath, apiId, secretKey)
 
         elif select == '4':
-            api = json_api_read(f'{path}api.json')
+            api = json_api_read(f'{ConfigPath}api.json')
             if not api:
                 print('无密钥文件')
                 continue
@@ -343,9 +348,11 @@ if __name__ == '__main__':
             a: str = input('确认清除?  y/n\n')
             if a == 'y':
                 try:
-                    os.remove(f'{path}api.json')
+                    os.remove(f'{ConfigPath}api.json')
                 except FileNotFoundError:
                     print('无配置文件')
+                except Exception as E:
+                    print(repr(E))
 
         elif select.startswith('tt'):
             if len(select) > 2:
@@ -353,12 +360,7 @@ if __name__ == '__main__':
                 tt_draw(ttType)
                 continue
             tt_draw()
-
         elif select == 'q':
             break
-
         else:
             print('无此选项')
-
-    print('主进程退出')
-    os.system('pause')
