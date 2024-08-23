@@ -1,12 +1,12 @@
 import codecs
 import hashlib
 import json
-import multiprocessing
 import os
 import random
 import re
 import threading
 import time
+import turtle
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -142,7 +142,7 @@ def process_and_write(data: dict):
     link: str = data.get('link')
     pub_time: str = data.get('pub_time')
 
-    if select == 'y':
+    if mode == 'y':
         with TranslateLock:
             title, summary, abstract = baidu_translate(title), baidu_translate(summary), baidu_translate(abstract)
 
@@ -168,7 +168,8 @@ def get_abstract(url: str, all_result: dict):
     text: str = str(soup.find(attrs={'class': 'c-article-body main-content'}))
 
     text = text.replace('<h2>', '\n### ').replace('</h2>', '\n').replace('\n</figcaption>', '</figcaption>')
-    text = re.sub(r'(</?a.*?>)|(</?p.*?>)|(</source>)|(</?div.*?>)|(</?span.*?>)|(<iframe.*>)', '', text)
+    text = re.sub(
+        r'(</?a.*?>)|(</?p.*?>)|(</source>)|(</?div.*?>)|(</?span.*?>)|(<iframe.*>)', '', text)
     # 修复链接
     text = text.replace('//media', 'https://media')
 
@@ -181,12 +182,7 @@ def process_text_analysis(tag):
         title_link = tag.find(attrs={"class": "c-card__link u-link-inherit"})
         title: str = re.sub('(</?a.*?>)|(</?p>)', '', str(title_link))
         summary = tag.find(attrs={"class": "c-card__summary u-mb-16 u-hide-sm-max"})
-        if summary:
-            summary = summary.select('p')[0]
-            summary = re.sub('(</?a.*?>)|(</?p>)', '', str(summary))
-        else:
-            summary = 'None'
-
+        summary = re.sub('(</?a.*?>)|(</?p>)', '', str(summary.select('p')[0])) if summary else 'None'
         link: str = title_link.get('href')
 
         pub_time = tag.select("time[class='c-meta__item']")
@@ -198,9 +194,7 @@ def process_text_analysis(tag):
         if title:
             url: str = f'https://www.nature.com{link}'
             url_hash = hashlib.md5(url.encode(ENCODING)).hexdigest()
-            if url_hash in urlCollect:
-                return
-            urlCollect.add(url_hash)
+            UrlCollect.add(url_hash)
             result: dict = {
                 'title': title,
                 'summary': summary,
@@ -231,28 +225,21 @@ def repeat_thread_detect(name: str) -> bool:
 
 
 def tt_draw(tt_type: str = '0'):
-    if tt_type == '0':
-        tName: str = 'draw_random'
-        if repeat_thread_detect(tName):
-            return
-        draw_random = threading.Thread(target=tt_draw_random, name=tName)
-        draw_random.start()
-        draw_random.join()
-    elif tt_type == '1':
-        tName: str = 'draw_polyhedral'
-        if repeat_thread_detect(tName):
-            return
-        draw_polyhedral = threading.Thread(target=tt_draw_polyhedral, name=tName)
-        draw_polyhedral.start()
-        draw_polyhedral.join()
-    elif tt_type == '2':
-        draw_picture = multiprocessing.Process(
-            target=TTPixelImage.tt_draw_picture,
-            args=('https://www.yangandxu.online/static/img/not%20used/cxk.jpg', 5, 0.2, 0.2), name='draw_picture')
-        draw_picture.start()
-        draw_picture.join()
-    else:
-        print('你干嘛,哎哟')
+    try:
+        if tt_type == '0':
+            tt_draw_random()
+        elif tt_type == '1':
+            tt_draw_polyhedral()
+        elif tt_type == '2':
+            TTPixelImage.tt_draw_picture(
+                'https://www.yangandxu.online/static/img/not%20used/cxk.jpg', 5, 0.2, 0.2)
+        else:
+            print('你干嘛,哎哟')
+    except turtle.Terminator:
+        return
+    except Exception as e:
+        print(repr(e))
+        return
 
 
 def json_api_write(fdir: str, api_id: str, secret_key: str):
@@ -287,22 +274,27 @@ def start_fetch():
     if web_change(soup_main):
         print('请求完成,正在解析文档')
         start_text_analysis(soup_main)
+        return True
+    return False
 
 
 if __name__ == '__main__':
+    # 翻译Api保存位置
     AppDir: str = os.environ.get('APPDATA')
-    FileName: str = 'api.json'
     ConfigPath: str = AppDir + '\\pyhttpRe\\'
+    FileName: str = 'api.json'
+    # 避免翻译内容冲突
     TranslateLock = threading.RLock()
-    urlCollect: set = set()
-    UseExternalData: bool = True
+    # 用于网址去重
+    UrlCollect: set = set()
     UseRandomHeaders: bool = False
-    WorkPool = ThreadPoolExecutor(max_workers=8)
+    # threadpool用于并行网络请求
+    WorkPool = ThreadPoolExecutor(max_workers=8, thread_name_prefix='fetch_natural_com')
 
     while True:
-        select: str = input('\n(1)获取; (2)强制刷新; (3)重新输入密钥; (4)查询当前密钥; (5)清除密钥; (q)退出\r\n')
+        mode: str = input('\n(1)获取; (2)强制刷新; (3)重新输入密钥; (4)查询当前密钥; (5)清除密钥; (q)退出\r\n')
 
-        if select == '1':
+        if mode == '1':
             if not os.path.exists(SAVE_FOLDER):
                 os.mkdir(SAVE_FOLDER)
             if not os.path.exists(OUTPUT_FOLDER):
@@ -311,10 +303,10 @@ if __name__ == '__main__':
             temp_save_file: str = f'{OUTPUT_FOLDER}/temp-Nature'
             with codecs.open(temp_save_file, 'w+', ENCODING) as inFoFile:
                 inFoFile.write('')
-                select: str = input('(y/n)是否翻译?: ')
-                start_fetch()
+                mode: str = input('(y/n)是否翻译?: ')
+                web_status: bool = start_fetch()
             date: str = time.strftime('%y-%m-%d')
-            if os.path.exists(temp_save_file):
+            if os.path.exists(temp_save_file) and web_status:
                 change_character_doc(temp_save_file, f'{OUTPUT_FOLDER}/{date}-Nature.md')
 
             print(f'爬取完成,结果保存于{date}-Nature.md')
@@ -323,7 +315,7 @@ if __name__ == '__main__':
             if os.path.exists(temp_save_file):
                 os.remove(temp_save_file)
 
-        elif select == '2':
+        elif mode == '2':
             try:
                 os.remove(f'{SAVE_FOLDER}/cache_hashes.json')
                 print('刷新完成')
@@ -332,19 +324,19 @@ if __name__ == '__main__':
             except Exception as E:
                 print(repr(E))
 
-        elif select == '3':
+        elif mode == '3':
             apiId: str = input('API账户: ')
             secretKey: str = input('API密钥: ')
             json_api_write(ConfigPath, apiId, secretKey)
 
-        elif select == '4':
+        elif mode == '4':
             api = json_api_read(f'{ConfigPath}api.json')
             if not api:
                 print('无密钥文件')
                 continue
             print(f'API账户: {api["api_id"]}\nAPI密钥: {api["secret_key"]}')
 
-        elif select == '5':
+        elif mode == '5':
             a: str = input('确认清除?  y/n\n')
             if a == 'y':
                 try:
@@ -354,13 +346,13 @@ if __name__ == '__main__':
                 except Exception as E:
                     print(repr(E))
 
-        elif select.startswith('tt'):
-            if len(select) > 2:
-                ttType = select[-1]
+        elif mode.startswith('tt'):
+            if len(mode) > 2:
+                ttType = mode[-1]
                 tt_draw(ttType)
                 continue
             tt_draw()
-        elif select == 'q':
+        elif mode == 'q':
             break
         else:
             print('无此选项')

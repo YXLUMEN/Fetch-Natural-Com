@@ -25,6 +25,8 @@ def tt_draw_random():
 
 
 def tt_draw_polyhedral():
+    turtle.speed(0)
+    turtle.delay(1)
     turtle.color('red')
     turtle.width(2)
     for x in range(100):
@@ -82,8 +84,9 @@ class TTPixelImage:
                 r, g, b = im[i, j][:3]
                 turtle.pencolor(r, g, b)
                 turtle.fd(pixel_size)
-            # 每行刷新,保持一些视觉效果
-            turtle.update()
+            # 每10行刷新,保持一些视觉效果
+            if i % 20 == 0:
+                turtle.update()
         turtle.done()
 
     @staticmethod
