@@ -142,7 +142,7 @@ def process_and_write(data: dict):
     link: str = data.get('link')
     pub_time: str = data.get('pub_time')
 
-    if mode == 'y':
+    if DoTranslate == 'y':
         with TranslateLock:
             title, summary, abstract = baidu_translate(title), baidu_translate(summary), baidu_translate(abstract)
 
@@ -193,7 +193,9 @@ def process_text_analysis(tag):
 
         if title:
             url: str = f'https://www.nature.com{link}'
-            url_hash = hashlib.md5(url.encode(ENCODING)).hexdigest()
+            url_hash: str = hashlib.md5(url.encode(ENCODING)).hexdigest()
+            if url_hash in UrlCollect:
+                return
             UrlCollect.add(url_hash)
             result: dict = {
                 'title': title,
@@ -214,7 +216,7 @@ def start_text_analysis(soup: BeautifulSoup):
             process_text_analysis(tag)
     WorkPool.shutdown()
     end: float = time.perf_counter()
-    print(f'\r\nAnalysis completed in: {end - start}s')
+    print(f'\r\nAnalysis completed in: {end - start:.3}s')
 
 
 def repeat_thread_detect(name: str) -> bool:
@@ -238,7 +240,7 @@ def tt_draw(tt_type: str = '0'):
     except turtle.Terminator:
         return
     except Exception as e:
-        print(repr(e))
+        print(f'绘图中止: {repr(e)}')
         return
 
 
@@ -259,7 +261,7 @@ def json_api_read(file_path: str):
 def start_fetch():
     url_n: str = 'https://www.nature.com/'
     global UseRandomHeaders
-    UseRandomHeaders = input('(y/n)是否使用随机请求头:  ').lower() == 'y'
+    UseRandomHeaders = input('(y/n) 是否使用随机请求头: ').lower().strip() in ('y', '')
 
     print('已选择随机请求头' if UseRandomHeaders else '未选择随机请求头')
     print('开始爬取\n' + '——' * 30)
@@ -292,18 +294,18 @@ if __name__ == '__main__':
     WorkPool = ThreadPoolExecutor(max_workers=8, thread_name_prefix='fetch_natural_com')
 
     while True:
-        mode: str = input('\n(1)获取; (2)强制刷新; (3)重新输入密钥; (4)查询当前密钥; (5)清除密钥; (q)退出\r\n')
+        mode: str = input('\n(1)获取; (2)强制刷新; (3)重新输入密钥; (4)查询当前密钥; (5)清除密钥; (q)退出\r\n').strip()
+        DoTranslate: str = 'n'
 
         if mode == '1':
             if not os.path.exists(SAVE_FOLDER):
                 os.mkdir(SAVE_FOLDER)
             if not os.path.exists(OUTPUT_FOLDER):
                 os.mkdir(OUTPUT_FOLDER)
-
             temp_save_file: str = f'{OUTPUT_FOLDER}/temp-Nature'
             with codecs.open(temp_save_file, 'w+', ENCODING) as inFoFile:
                 inFoFile.write('')
-                mode: str = input('(y/n)是否翻译?: ')
+                DoTranslate: str = input('(y/n) 是否翻译: ').strip()
                 web_status: bool = start_fetch()
             date: str = time.strftime('%y-%m-%d')
             if os.path.exists(temp_save_file) and web_status:
@@ -337,10 +339,11 @@ if __name__ == '__main__':
             print(f'API账户: {api["api_id"]}\nAPI密钥: {api["secret_key"]}')
 
         elif mode == '5':
-            a: str = input('确认清除?  y/n\n')
+            a: str = input('(y/n) 确认清除: ').strip()
             if a == 'y':
                 try:
                     os.remove(f'{ConfigPath}api.json')
+                    print('清除配置文件')
                 except FileNotFoundError:
                     print('无配置文件')
                 except Exception as E:
