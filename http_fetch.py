@@ -164,9 +164,10 @@ def process_and_write(data: dict):
 def get_abstract(url: str, all_result: dict):
     html: str = get_html(url, rand=UseRandomHeaders, re_try_times=2)
     soup: BeautifulSoup = BeautifulSoup(html, "lxml")
-    [s.extract() for s in soup.find_all(attrs={'class': 'recommended pull pull--left u-sans-serif'})]
-    text: str = str(soup.find(attrs={'class': 'c-article-body main-content'}))
 
+    [s.extract() for s in soup.find_all(attrs={'class': 'recommended pull pull--left u-sans-serif'})]
+
+    text = soup.find(attrs={'class': 'c-article-body main-content'})
     text = text.replace('<h2>', '\n### ').replace('</h2>', '\n').replace('\n</figcaption>', '</figcaption>')
     text = re.sub(
         r'(</?a.*?>)|(</?p.*?>)|(</source>)|(</?div.*?>)|(</?span.*?>)|(<iframe.*>)', '', text)
@@ -274,7 +275,7 @@ def start_fetch():
         exit('\r\n链接超时')
 
     if web_change(soup_main):
-        print('请求完成,正在解析文档')
+        print('目录请求完成,正在解析文档')
         start_text_analysis(soup_main)
         return True
     return False
@@ -302,11 +303,14 @@ if __name__ == '__main__':
                 os.mkdir(SAVE_FOLDER)
             if not os.path.exists(OUTPUT_FOLDER):
                 os.mkdir(OUTPUT_FOLDER)
+
             temp_save_file: str = f'{OUTPUT_FOLDER}/temp-Nature'
             with codecs.open(temp_save_file, 'w+', ENCODING) as inFoFile:
                 inFoFile.write('')
                 DoTranslate: str = input('(y/n) 是否翻译: ').strip()
+                # 主要逻辑
                 web_status: bool = start_fetch()
+
             date: str = time.strftime('%y-%m-%d')
             if os.path.exists(temp_save_file) and web_status:
                 change_character_doc(temp_save_file, f'{OUTPUT_FOLDER}/{date}-Nature.md')
